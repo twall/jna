@@ -27,6 +27,12 @@ package com.sun.jna.internal;
 import java.lang.ref.PhantomReference;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -44,65 +50,79 @@ public class Cleaner {
         return INSTANCE;
     }
 
+    // Guard for trackedObjects and cleanerThread. The readlock is utilized when
+    // the trackedObjects are manipulated, the writelock protectes starting and
+    // stopping the CleanerThread
+    private final ReadWriteLock cleanerThreadLock = new ReentrantReadWriteLock();
     private final ReferenceQueue<Object> referenceQueue;
-    private Thread cleanerThread;
-    private CleanerRef firstCleanable;
+    // Count of objects tracked by the cleaner. When >0 it means objects are
+    // being tracked by the cleaner and the cleanerThread must be running
+    private final AtomicLong trackedObjects = new AtomicLong();
+    // Map only serves as holder, so that the CleanerRefs stay hard referenced
+    // and quickly accessible for removal
+    @SuppressWarnings("MismatchedQueryAndUpdateOfCollection")
+    private final Map<CleanerRef,CleanerRef> map = new ConcurrentHashMap<>();
+    // Thread to handle the actual cleaning
+    private volatile Thread cleanerThread;
 
     private Cleaner() {
         referenceQueue = new ReferenceQueue<>();
     }
 
-    public synchronized Cleanable register(Object obj, Runnable cleanupTask) {
+    @SuppressWarnings("EmptySynchronizedStatement")
+    public Cleanable register(Object obj, Runnable cleanupTask) {
         // The important side effect is the PhantomReference, that is yielded
         // after the referent is GCed
-        return add(new CleanerRef(this, obj, referenceQueue, cleanupTask));
-    }
-
-    private synchronized CleanerRef add(CleanerRef ref) {
-        synchronized (referenceQueue) {
-            if (firstCleanable == null) {
-                firstCleanable = ref;
-            } else {
-                ref.setNext(firstCleanable);
-                firstCleanable.setPrevious(ref);
-                firstCleanable = ref;
+        try {
+            return add(new CleanerRef(this, obj, referenceQueue, cleanupTask));
+        } finally {
+            synchronized (obj) {
+                // Used as a reachability fence for obj
+                // Ensure, that add completes before obj can be collected and
+                // the cleaner is run
             }
-            if (cleanerThread == null) {
-                Logger.getLogger(Cleaner.class.getName()).log(Level.FINE, "Starting CleanerThread");
-                cleanerThread = new CleanerThread();
-                cleanerThread.start();
-            }
-            return ref;
         }
     }
 
-    private synchronized boolean remove(CleanerRef ref) {
-        synchronized (referenceQueue) {
-            boolean inChain = false;
-            if (ref == firstCleanable) {
-                firstCleanable = ref.getNext();
-                inChain = true;
+    private CleanerRef add(CleanerRef ref) {
+        map.put(ref, ref);
+        cleanerThreadLock.readLock().lock();
+        try {
+            long count = trackedObjects.incrementAndGet();
+            if (cleanerThread == null && count > 0) {
+                cleanerThreadLock.readLock().unlock();
+                cleanerThreadLock.writeLock().lock();
+                try {
+                    if (cleanerThread == null && trackedObjects.get() > 0) {
+                        Logger.getLogger(Cleaner.class.getName()).log(Level.FINE, "Starting CleanerThread");
+                        cleanerThread = new CleanerThread();
+                        cleanerThread.start();
+                    }
+                } finally {
+                    cleanerThreadLock.readLock().lock();
+                    cleanerThreadLock.writeLock().unlock();
+                }
             }
-            if (ref.getPrevious() != null) {
-                ref.getPrevious().setNext(ref.getNext());
-            }
-            if (ref.getNext() != null) {
-                ref.getNext().setPrevious(ref.getPrevious());
-            }
-            if (ref.getPrevious() != null || ref.getNext() != null) {
-                inChain = true;
-            }
-            ref.setNext(null);
-            ref.setPrevious(null);
-            return inChain;
+        } finally {
+            cleanerThreadLock.readLock().unlock();
+        }
+        return ref;
+    }
+
+    private void remove(CleanerRef ref) {
+        map.remove(ref);
+        cleanerThreadLock.readLock().lock();
+        try {
+            trackedObjects.decrementAndGet();
+        } finally {
+            cleanerThreadLock.readLock().unlock();
         }
     }
 
     private static class CleanerRef extends PhantomReference<Object> implements Cleanable {
         private final Cleaner cleaner;
         private final Runnable cleanupTask;
-        private CleanerRef previous;
-        private CleanerRef next;
+        private final AtomicBoolean cleaned = new AtomicBoolean(false);
 
         public CleanerRef(Cleaner cleaner, Object referent, ReferenceQueue<? super Object> q, Runnable cleanupTask) {
             super(referent, q);
@@ -112,25 +132,10 @@ public class Cleaner {
 
         @Override
         public void clean() {
-            if(cleaner.remove(this)) {
+            if (!cleaned.getAndSet(true)) {
+                cleaner.remove(this);
                 cleanupTask.run();
             }
-        }
-
-        CleanerRef getPrevious() {
-            return previous;
-        }
-
-        void setPrevious(CleanerRef previous) {
-            this.previous = previous;
-        }
-
-        CleanerRef getNext() {
-            return next;
-        }
-
-        void setNext(CleanerRef next) {
-            this.next = next;
         }
     }
 
@@ -155,22 +160,28 @@ public class Cleaner {
                     if (ref instanceof CleanerRef) {
                         ((CleanerRef) ref).clean();
                     } else if (ref == null) {
-                        synchronized (referenceQueue) {
-                            Logger logger = Logger.getLogger(Cleaner.class.getName());
-                            if (firstCleanable == null) {
-                                cleanerThread = null;
-                                logger.log(Level.FINE, "Shutting down CleanerThread");
-                                break;
-                            } else if (logger.isLoggable(Level.FINER)) {
-                                StringBuilder registeredCleaners = new StringBuilder();
-                                for(CleanerRef cleanerRef = firstCleanable; cleanerRef != null; cleanerRef = cleanerRef.next) {
-                                    if(registeredCleaners.length() != 0) {
-                                        registeredCleaners.append(", ");
+                        cleanerThreadLock.readLock().lock();
+                        try {
+                            if (trackedObjects.get() == 0) {
+                                cleanerThreadLock.readLock().unlock();
+                                cleanerThreadLock.writeLock().lock();
+                                try {
+                                    if (trackedObjects.get() == 0) {
+                                        Logger.getLogger(Cleaner.class.getName()).log(Level.FINE, "Shutting down CleanerThread");
+                                        cleanerThread = null;
                                     }
-                                    registeredCleaners.append(cleanerRef.cleanupTask.toString());
+                                    break;
+                                } finally {
+                                    cleanerThreadLock.readLock().lock();
+                                    cleanerThreadLock.writeLock().unlock();
                                 }
-                                logger.log(Level.FINER, "Registered Cleaners: {0}", registeredCleaners.toString());
                             }
+                        } finally {
+                            cleanerThreadLock.readLock().unlock();
+                        }
+                        Logger logger = Logger.getLogger(Cleaner.class.getName());
+                        if (logger.isLoggable(Level.FINER)) {
+                            logger.log(Level.FINER, "Registered Cleaners: {0}", trackedObjects.get());
                         }
                     }
                 } catch (InterruptedException ex) {
