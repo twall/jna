@@ -169,8 +169,8 @@ public class Cleaner {
                                     if (trackedObjects.get() == 0) {
                                         Logger.getLogger(Cleaner.class.getName()).log(Level.FINE, "Shutting down CleanerThread");
                                         cleanerThread = null;
+                                        break;
                                     }
-                                    break;
                                 } finally {
                                     cleanerThreadLock.readLock().lock();
                                     cleanerThreadLock.writeLock().unlock();
