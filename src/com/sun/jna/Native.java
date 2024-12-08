@@ -23,6 +23,8 @@
  */
 package com.sun.jna;
 
+import com.sun.jna.Callback.UncaughtExceptionHandler;
+import com.sun.jna.Structure.FFIType;
 import java.awt.Component;
 import java.awt.GraphicsEnvironment;
 import java.awt.HeadlessException;
@@ -33,6 +35,10 @@ import java.io.FilenameFilter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.UnsupportedEncodingException;
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodHandles.Lookup;
+import java.lang.invoke.MethodType;
 import java.lang.ref.Reference;
 import java.lang.ref.WeakReference;
 import java.lang.reflect.Array;
@@ -50,7 +56,6 @@ import java.nio.ByteBuffer;
 import java.nio.charset.Charset;
 import java.nio.charset.IllegalCharsetNameException;
 import java.nio.charset.UnsupportedCharsetException;
-import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -60,11 +65,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.StringTokenizer;
 import java.util.WeakHashMap;
-
-import com.sun.jna.Callback.UncaughtExceptionHandler;
-import com.sun.jna.Structure.FFIType;
 import java.util.logging.Level;
 import java.util.logging.Logger;
+import java.util.stream.Stream;
 
 /** Provides generation of invocation plumbing for a defined native
  * library interface.  Also provides various utilities for native operations.
@@ -181,6 +184,16 @@ public final class Native implements Version {
     private static final int TYPE_BOOL = 4;
     private static final int TYPE_LONG_DOUBLE = 5;
 
+    private static final MethodHandle stackWalkerGetInstance;
+    private static final Enum stackWalkerRetainClassReference;
+    private static final MethodHandle stackWalkerWalk;
+    private static final Object stackWalkerFilter;
+
+    private static final MethodHandle securityManagerExposerConstructor;
+    private static final MethodHandle securityManagerGetClassContext;
+
+    private static final MethodHandle accessControllerDoPrivileged;
+
     static final int MAX_ALIGNMENT;
     static final int MAX_PADDING;
 
@@ -255,6 +268,70 @@ public final class Native implements Version {
             || (Platform.isAndroid() && !Platform.isIntel())
             ? 8 : LONG_SIZE;
         MAX_PADDING = (Platform.isMac() && Platform.isPPC()) ? 8 : MAX_ALIGNMENT;
+
+        Enum stackWalkerRetainClassReferenceBuilder;
+        MethodHandle stackWalkerGetInstanceBuilder;
+        MethodHandle stackWalkerWalkBuilder;
+        Object stackWalkerFilterBuilder;
+        try {
+            Lookup lookup = MethodHandles.lookup();
+            Class<?> stackWalkerClass = Class.forName("java.lang.StackWalker");
+            Class<? extends Enum> stackWalkerOptionClass = (Class<? extends Enum>) Class.forName("java.lang.StackWalker$Option");
+            stackWalkerRetainClassReferenceBuilder = Enum.valueOf(stackWalkerOptionClass, "RETAIN_CLASS_REFERENCE");
+            stackWalkerGetInstanceBuilder = lookup.findStatic(stackWalkerClass, "getInstance", MethodType.methodType(stackWalkerClass, stackWalkerOptionClass));
+            stackWalkerWalkBuilder = lookup.findVirtual(stackWalkerClass, "walk", MethodType.methodType(Object.class, java.util.function.Function.class));
+            Class<?> stackframe = Class.forName("java.lang.StackWalker$StackFrame");
+            MethodHandle stackFrameGetDeclaringClass = lookup.findVirtual(stackframe, "getDeclaringClass", MethodType.methodType(Class.class));
+            stackWalkerFilterBuilder = new java.util.function.Function<Stream<Object>, Class<?>>() {
+                @Override
+                public Class<?> apply(Stream<Object> t) {
+                    Object stackFrame = t.skip(2).findFirst().get();
+                    try {
+                        return (Class<?>) stackFrameGetDeclaringClass.invoke(stackFrame);
+                    } catch (Throwable ex) {
+                        return null;
+                    }
+                }
+            };
+
+        } catch (Throwable ex) {
+            LOG.log(Level.FINE, "Failed to initialize stack accessor method StackWalker", ex);
+            stackWalkerRetainClassReferenceBuilder = null;
+            stackWalkerGetInstanceBuilder = null;
+            stackWalkerWalkBuilder = null;
+            stackWalkerFilterBuilder = null;
+        }
+        stackWalkerRetainClassReference = stackWalkerRetainClassReferenceBuilder;
+        stackWalkerGetInstance = stackWalkerGetInstanceBuilder;
+        stackWalkerWalk = stackWalkerWalkBuilder;
+        stackWalkerFilter = stackWalkerFilterBuilder;
+
+        MethodHandle securityManagerExposerConstructorBuilder;
+        MethodHandle securityManagerGetClassContextBuilder;
+        try {
+            Lookup lookup = MethodHandles.lookup();
+            Class<?> securityManagerExposerClass = Class.forName("com.sun.jna.SecurityManagerExposer");
+            securityManagerExposerConstructorBuilder = lookup.findConstructor(securityManagerExposerClass, MethodType.methodType(void.class));
+            securityManagerGetClassContextBuilder = lookup.findVirtual(securityManagerExposerClass, "getClassContext", MethodType.methodType(Class[].class));
+        } catch (Throwable ex) {
+            LOG.log(Level.FINE, "Failed to initialize stack accessor method SecurityManager", ex);
+            securityManagerExposerConstructorBuilder = null;
+            securityManagerGetClassContextBuilder = null;
+        }
+        securityManagerExposerConstructor = securityManagerExposerConstructorBuilder;
+        securityManagerGetClassContext = securityManagerGetClassContextBuilder;
+
+        MethodHandle accessControllerDoPrivilegedBuilder = null;
+        try {
+            Lookup lookup = MethodHandles.lookup();
+            Class<?> accessControllerClass = Class.forName("java.security.AccessController");
+            accessControllerDoPrivilegedBuilder = lookup.findStatic(accessControllerClass, "doPrivileged", MethodType.methodType(Object.class, PrivilegedAction.class));
+        } catch (Throwable ex) {
+            LOG.log(Level.FINE, "Failed to initialize AccessController#doPrivileged", ex);
+            accessControllerDoPrivilegedBuilder = null;
+        }
+        accessControllerDoPrivileged = accessControllerDoPrivilegedBuilder;
+
         System.setProperty("jna.loaded", "true");
     }
 
@@ -1275,7 +1352,7 @@ public final class Native implements Version {
         try {
 
             final ClassLoader cl = Native.class.getClassLoader();
-            Method m = AccessController.doPrivileged(new PrivilegedAction<Method>() {
+            Method m = (Method) accessControllerDoPrivileged.invoke(new PrivilegedAction<Method>() {
                 @Override
                 public Method run() {
                     try {
@@ -1294,7 +1371,7 @@ public final class Native implements Version {
             }
             return null;
         }
-        catch (Exception e) {
+        catch (Throwable e) {
             return null;
         }
     }
@@ -1523,19 +1600,35 @@ public final class Native implements Version {
         was made.
     */
     static Class<?> getCallingClass() {
-        Class<?>[] context = new SecurityManager() {
-            @Override
-            public Class<?>[] getClassContext() {
-                return super.getClassContext();
+        if (stackWalkerGetInstance != null) {
+            try {
+                Object walker = stackWalkerGetInstance.invoke(stackWalkerRetainClassReference);
+                Class<?> caller = (Class<?>) stackWalkerWalk.invoke(walker, stackWalkerFilter);
+                return caller;
+            } catch (Throwable ex) {
+                LOG.log(Level.WARNING, "Failed to invoke StackWalker#getInstance or StackWalker#walk", ex);
             }
-        }.getClassContext();
-        if (context == null) {
-            throw new IllegalStateException("The SecurityManager implementation on this platform is broken; you must explicitly provide the class to register");
         }
-        if (context.length < 4) {
-            throw new IllegalStateException("This method must be called from the static initializer of a class");
+
+        if (securityManagerExposerConstructor != null) {
+            Class<?>[] context = null;
+            try {
+                Object securityManagerExposer = securityManagerExposerConstructor.invoke();
+                context = (Class<?>[]) securityManagerGetClassContext.invoke(securityManagerExposer);
+            } catch (Throwable ex) {
+                LOG.log(Level.WARNING, "Failed to invoke SecurityManagerExposer#<init> or SecurityManagerExposer#getClassContext", ex);
+            }
+
+            if (context == null) {
+                throw new IllegalStateException("The SecurityManager implementation on this platform is broken; you must explicitly provide the class to register");
+            }
+            if (context.length < 4) {
+                throw new IllegalStateException("This method must be called from the static initializer of a class");
+            }
+            return context[3];
         }
-        return context[3];
+
+        throw new IllegalStateException("Neither the StackWalker, nor the SecurityManager based getCallingClass implementation are useable; you must explicitly provide the class to register");
     }
 
     /**
