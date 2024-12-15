@@ -1398,14 +1398,10 @@ public interface OaIdl {
             public VARIANT.ByReference lpvarValue;
 
             public _VARDESC() {
-                setType("lpvarValue");
-                this.read();
             }
 
             public _VARDESC(Pointer pointer) {
                 super(pointer);
-                setType("lpvarValue");
-                this.read();
             }
 
             /**
@@ -1431,8 +1427,14 @@ public interface OaIdl {
 
         public VARDESC(Pointer pointer) {
             super(pointer);
-            this._vardesc.setType("lpvarValue");
             this.read();
+        }
+
+        @Override
+        public void read() {
+            readField("varkind");
+            this._vardesc.setType(varkind.value == VARKIND.VAR_CONST ? "lpvarValue" : "oInst");
+            super.read();
         }
     }
 
@@ -1654,14 +1656,10 @@ public interface OaIdl {
             public HREFTYPE hreftype;
 
             public _TYPEDESC() {
-                this.setType("hreftype");
-                this.read();
             }
 
             public _TYPEDESC(Pointer pointer) {
                 super(pointer);
-                this.setType("hreftype");
-                this.read();
             }
 
             public TYPEDESC.ByReference getLptdesc() {
@@ -1687,17 +1685,34 @@ public interface OaIdl {
         public VARTYPE vt;
 
         public TYPEDESC() {
-            this.read();
         }
 
         public TYPEDESC(Pointer pointer) {
             super(pointer);
-            this.read();
         }
 
         public TYPEDESC(_TYPEDESC _typedesc, VARTYPE vt) {
             this._typedesc = _typedesc;
             this.vt = vt;
+        }
+
+        @Override
+        public void read() {
+            readField("vt");
+            switch (vt.intValue()) {
+                case Variant.VT_PTR:
+                case Variant.VT_SAFEARRAY:
+                    _typedesc.setType("lptdesc");
+                    break;
+                case Variant.VT_CARRAY:
+                    _typedesc.setType("lpadesc");
+                    break;
+                case Variant.VT_USERDEFINED:
+                default:
+                    _typedesc.setType("hreftype");
+                    break;
+            }
+            super.read();
         }
     }
 
