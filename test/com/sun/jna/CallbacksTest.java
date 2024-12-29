@@ -34,10 +34,10 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.WeakHashMap;
 
 import com.sun.jna.Callback.UncaughtExceptionHandler;
 import com.sun.jna.CallbacksTest.TestLibrary.CbCallback;
+import com.sun.jna.internal.Cleaner;
 import com.sun.jna.ptr.IntByReference;
 import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.W32APIOptions;
@@ -76,6 +76,24 @@ public class CallbacksTest extends TestCase implements Paths {
                 fail("Timed out waiting for native thread " + thread
                         + " to detach and terminate");
             }
+        }
+    }
+
+    public static abstract class Condition<T> {
+        protected final T obj;
+
+        public Condition(T t) { obj = t; }
+
+        public boolean evaluate() { return evaluate(obj); }
+
+        abstract boolean evaluate(T t);
+    }
+    public static void waitForGc(Condition<?> condition) throws Exception {
+        for (int i = 0; i < 2 * Cleaner.MASTER_CLEANUP_INTERVAL_MS / 10 + 5 && condition.evaluate(); ++i) {
+            synchronized (CallbacksTest.class) { // cleanups happen in a different thread, make sure we see it here
+                System.gc();
+            }
+            Thread.sleep(10); // Give the GC a chance to run
         }
     }
 
@@ -354,31 +372,26 @@ public class CallbacksTest extends TestCase implements Paths {
         lib.callVoidCallback(cb);
         assertTrue("Callback not called", called[0]);
 
-        Map<Callback, CallbackReference> refs = new WeakHashMap<>(callbackCache());
-        assertTrue("Callback not cached", refs.containsKey(cb));
+        assertTrue("Callback not cached", callbackCache().containsKey(cb));
+        final Map<Callback, CallbackReference> refs = callbackCache();
         CallbackReference ref = refs.get(cb);
-        refs = callbackCache();
-        Pointer cbstruct = ref.cbstruct;
+        final Pointer cbstruct = ref.cbstruct;
 
         cb = null;
-        System.gc();
-        for (int i = 0; i < 100 && (ref.get() != null || refs.containsValue(ref)); ++i) {
-            Thread.sleep(10); // Give the GC a chance to run
-            System.gc();
-        }
+        waitForGc(new Condition<CallbackReference>(ref) {
+            public boolean evaluate(CallbackReference _ref) {
+                return _ref.get() != null || refs.containsValue(_ref);
+            }
+        });
         assertNull("Callback not GC'd", ref.get());
         assertFalse("Callback still in map", refs.containsValue(ref));
 
         ref = null;
-        System.gc();
-        for (int i = 0; i < 100 && (cbstruct.peer != 0 || refs.size() > 0); ++i) {
-            // Flush weak hash map
-            refs.size();
-            try {
-                Thread.sleep(10); // Give the GC a chance to run
-                System.gc();
-            } finally {}
-        }
+        waitForGc(new Condition<Object>(null) {
+            public boolean evaluate(Object o) {
+                return refs.size() > 0 || cbstruct.peer != 0;
+            }
+        });
         assertEquals("Callback trampoline not freed", 0, cbstruct.peer);
     }
 
@@ -678,7 +691,7 @@ public class CallbacksTest extends TestCase implements Paths {
         assertEquals("Wrong String return", VALUE + VALUE2, value);
     }
 
-    public void testStringCallbackMemoryReclamation() throws InterruptedException {
+    public void testStringCallbackMemoryReclamation() throws Exception {
         TestLibrary.StringCallback cb = new TestLibrary.StringCallback() {
             @Override
             public String callback(String arg, String arg2) {
@@ -687,24 +700,22 @@ public class CallbacksTest extends TestCase implements Paths {
         };
 
         // A little internal groping
-        Map<?, ?> m = CallbackReference.allocations;
+        final Map<?, ?> m = CallbackReference.allocations;
         m.clear();
 
         Charset charset = Charset.forName(Native.getDefaultStringEncoding());
         String arg = getName() + "1" + charset.decode(charset.encode(UNICODE));
         String arg2 = getName() + "2" + charset.decode(charset.encode(UNICODE));
         String value = lib.callStringCallback(cb, arg, arg2);
-        WeakReference<Object> ref = new WeakReference<>(value);
+        final WeakReference<Object> ref = new WeakReference<>(value);
 
         arg = null;
         value = null;
-        System.gc();
-        for (int i = 0; i < 100 && (ref.get() != null || m.size() > 0); ++i) {
-            try {
-                Thread.sleep(10); // Give the GC a chance to run
-                System.gc();
-            } finally {}
-        }
+        waitForGc(new Condition<Object>(null) {
+            public boolean evaluate(Object o) {
+                return m.size() > 0 || ref.get() != null;
+            }
+        });
         assertNull("NativeString reference not GC'd", ref.get());
         assertEquals("NativeString reference still held: " + m.values(), 0, m.size());
     }
@@ -1477,30 +1488,27 @@ public class CallbacksTest extends TestCase implements Paths {
         assertEquals("Wrong module HANDLE for DLL function pointer", handle, pref.getValue());
 
         // Check slot re-use
-        Map<Callback, CallbackReference> refs = new WeakHashMap<>(callbackCache());
-        assertTrue("Callback not cached", refs.containsKey(cb));
+        assertTrue("Callback not cached", callbackCache().containsKey(cb));
+        final Map<Callback, CallbackReference> refs = callbackCache();
         CallbackReference ref = refs.get(cb);
-        refs = callbackCache();
         Pointer cbstruct = ref.cbstruct;
         Pointer first_fptr = cbstruct.getPointer(0);
 
         cb = null;
-        System.gc();
-        for (int i = 0; i < 100 && (ref.get() != null || refs.containsValue(ref)); ++i) {
-            Thread.sleep(10); // Give the GC a chance to run
-            System.gc();
-        }
+        waitForGc(new Condition<CallbackReference>(ref) {
+            public boolean evaluate(CallbackReference _ref) {
+                return _ref.get() != null || refs.containsValue(_ref);
+            }
+        });
         assertNull("Callback not GC'd", ref.get());
         assertFalse("Callback still in map", refs.containsValue(ref));
 
         ref = null;
-        System.gc();
-        for (int i = 0; i < 100 && (cbstruct.peer != 0 || refs.size() > 0); ++i) {
-            // Flush weak hash map
-            refs.size();
-            Thread.sleep(10); // Give the GC a chance to run
-            System.gc();
-        }
+        waitForGc(new Condition<Pointer>(cbstruct) {
+            public boolean evaluate(Pointer p) {
+                return refs.size() > 0 || p.peer != 0;
+            }
+        });
         assertEquals("Callback trampoline not freed", 0, cbstruct.peer);
 
         // Next allocation should be at same place

@@ -1236,6 +1236,7 @@ cd ..
     </propertyset>
     <junit fork="${test.fork}" forkmode="${test.forkmode}" failureproperty="testfailure" tempdir="${build}">
       <jvmarg if:set="test.jdwp" value="${test.jdwp}" />
+      <jvmarg value="-Xmx64m" />
       <!-- optionally run headless -->
       <syspropertyset refid="headless"/>
       <!-- avoid VM conflicts with JNA protected mode -->
