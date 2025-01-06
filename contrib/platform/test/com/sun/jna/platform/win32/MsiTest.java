@@ -24,7 +24,9 @@ package com.sun.jna.platform.win32;
 
 import java.util.Arrays;
 
+import com.sun.jna.platform.win32.WinBase.FILETIME;
 import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.PointerByReference;
 
 import junit.framework.TestCase;
 
@@ -89,5 +91,59 @@ public class MsiTest extends TestCase {
 
         String path = new String(pathBuffer, 0, pathBufferSize.getValue()).trim();
         assertFalse("Path is empty", path.isEmpty());
+    }
+
+    public void testMsiOpenDatabaseW() {
+        PointerByReference phDatabase = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_PARAMETER, Msi.INSTANCE.MsiOpenDatabase("", Msi.MSIDBOPEN_READONLY, phDatabase));
+    }
+
+    public void testMsiCloseHandle() {
+        PointerByReference handle = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiCloseHandle(handle.getPointer()));
+    }
+
+    public void testMsiDatabaseOpenViewW() {
+        PointerByReference hDatabase = new PointerByReference();
+        PointerByReference phView = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiDatabaseOpenView(hDatabase.getPointer(), "", phView));
+    }
+
+    public void testMsiRecordGetStringW() {
+        PointerByReference hRecord = new PointerByReference();
+        IntByReference pcchValueBuf = new IntByReference();
+        char[] szValueBuf = new char[40];
+        pcchValueBuf.setValue(40);
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiRecordGetString(hRecord.getPointer(), 0, szValueBuf, pcchValueBuf));
+    }
+
+    public void testMsiViewFetch() {
+        PointerByReference hView = new PointerByReference();
+        PointerByReference phRecord = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiViewFetch(hView.getPointer(), phRecord));
+    }
+
+
+    public void testMsiViewExecute() {
+        PointerByReference hView = new PointerByReference();
+        PointerByReference hRecord = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiViewExecute(hView.getPointer(), hRecord.getPointer()));
+    }
+
+    public void testMsiGetSummaryInformationW() {
+        PointerByReference hDatabase = new PointerByReference();
+        PointerByReference phSummaryInfo = new PointerByReference();
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiGetSummaryInformation(hDatabase.getPointer(), "", 0, phSummaryInfo));
+    }
+
+    public void testMsiSummaryInfoGetProperty() {
+        PointerByReference hSummaryInfo = new PointerByReference();
+        IntByReference puiDataType = new IntByReference();
+        IntByReference piValue = new IntByReference();
+        FILETIME pftValue = new FILETIME();
+        char[] szValueBuf = new char[40];
+        IntByReference pcchValueBuf = new IntByReference();
+        pcchValueBuf.setValue(40);
+        assertEquals(WinError.ERROR_INVALID_HANDLE, Msi.INSTANCE.MsiSummaryInfoGetProperty(hSummaryInfo.getPointer(), 7, puiDataType, piValue, pftValue, szValueBuf, pcchValueBuf));
     }
 }

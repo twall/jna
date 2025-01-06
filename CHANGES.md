@@ -7,6 +7,7 @@ Next Release (5.17.0)
 
 Features
 --------
+* [#1537](https://github.com/java-native-access/jna/pull/1537): Add MSI database access functions - [@russellbanks](https://github.com/russellbanks)
 
 Bug Fixes
 ---------

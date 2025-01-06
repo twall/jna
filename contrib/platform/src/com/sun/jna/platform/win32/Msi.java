@@ -23,7 +23,10 @@
 package com.sun.jna.platform.win32;
 
 import com.sun.jna.Native;
+import com.sun.jna.Pointer;
+import com.sun.jna.platform.win32.WinBase.FILETIME;
 import com.sun.jna.ptr.IntByReference;
+import com.sun.jna.ptr.PointerByReference;
 import com.sun.jna.win32.StdCallLibrary;
 import com.sun.jna.win32.W32APIOptions;
 
@@ -32,7 +35,7 @@ import com.sun.jna.win32.W32APIOptions;
  */
 public interface Msi extends StdCallLibrary {
 
-    Msi INSTANCE = Native.load("msi", Msi.class, W32APIOptions.DEFAULT_OPTIONS);
+    Msi INSTANCE = Native.load("msi", Msi.class, W32APIOptions.UNICODE_OPTIONS);
 
     /**
      * The component being requested is disabled on the computer.
@@ -103,6 +106,36 @@ public interface Msi extends StdCallLibrary {
      * The feature is installed in the default location: local or source.
      */
     int INSTALLSTATE_DEFAULT =  5;
+
+    /**
+     * Create a new database, direct mode read/write.
+     */
+    static final String MSIDBOPEN_CREATEDIRECT = "MSIDBOPEN_CREATEDIRECT";
+
+    /**
+     * Create a new database, transact mode read/write.
+     */
+    static final String MSIDBOPEN_CREATE = "MSIDBOPEN_CREATE";
+
+    /**
+     * Open a database direct read/write without transaction.
+     */
+    static final String MSIDBOPEN_DIRECT = "MSIDBOPEN_DIRECT";
+
+    /**
+     * Open a database read-only, no persistent changes.
+     */
+    static final String MSIDBOPEN_READONLY = "MSIDBOPEN_READONLY";
+
+    /**
+     * Open a database read/write in transaction mode.
+     */
+    static final String MSIDBOPEN_TRANSACT = "MSIDBOPEN_TRANSACT";
+
+    /**
+     * Add this flag to indicate a patch file.
+     */
+    static final String MSIDBOPEN_PATCHFILE = "MSIDBOPEN_PATCHFILE";
 
     /**
      * The MsiGetComponentPath function returns the full path to an installed component. If the key path for the
@@ -218,4 +251,209 @@ public interface Msi extends StdCallLibrary {
      *  ERROR_SUCCESS - A value was enumerated.
      */
     int MsiEnumComponents(WinDef.DWORD iComponentIndex, char[] lpComponentBuf);
+
+    /**
+     * The MsiCloseHandle function closes an open installation handle.
+     *
+     * @param hAny
+     *   Specifies any open installation handle.
+     *
+     * @return
+     *   ERROR_INVALID_HANDLE - An invalid handle was passed to the function.
+     *   ERROR_SUCCESS - The function succeeded.
+     */
+    int MsiCloseHandle(Pointer hAny);
+
+    /**
+     * The MsiDatabaseOpenView function prepares a database query and creates a view object. This function
+     * returns a handle that should be closed using {@link #MsiCloseHandle}.
+     *
+     * @param hDatabase
+     *   Handle to the database to which you want to open a view object.
+     *
+     * @param szQuery
+     *   Specifies a SQL query string for querying the database.
+     *
+     * @param phView
+     *   Pointer to a handle for the returned view.
+     *
+     * @return
+     *  ERROR_BAD_QUERY_SYNTAX - An invalid SQL query string was passed to the function.
+     *  ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *  ERROR_SUCCESS - The function succeeded, and the handle is to a view object.
+     */
+    int MsiDatabaseOpenView(Pointer hDatabase, String szQuery, PointerByReference phView);
+
+    /**
+     * The MsiGetSummaryInformation function obtains a handle to the _SummaryInformation stream for an installer
+     * database. This function returns a handle that should be closed using {@link #MsiCloseHandle}.
+     *
+     * @param hDatabase
+     *   Handle to the database.
+     *
+     * @param szDatabasePath
+     *   Specifies the path to the database.
+     *
+     * @param uiUpdateCount
+     *   Specifies the maximum number of updated values.
+     *
+     * @param phSummaryInfo
+     *   Pointer to the location from which to receive the summary information handle.
+     *
+     * @return
+     *   ERROR_INSTALL_PACKAGE_INVALID - The installation package is invalid.
+     *   ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *   ERROR_INVALID_PARAMETER - An invalid parameter was passed to the function.
+     *   ERROR_SUCCESS - The function succeeded.
+     */
+    int MsiGetSummaryInformation(Pointer hDatabase, String szDatabasePath, int uiUpdateCount,
+        PointerByReference phSummaryInfo);
+
+    /**
+     * The MsiOpenDatabase function opens a database file for data access. This function returns a handle that should be
+     * closed using {@link #MsiCloseHandle}.
+     *
+     * @param szDatabasePath
+     *   Specifies the full path or relative path to the database file.
+     *
+     * @param szPersist
+     *   Receives the full path to the file or the persistence mode. You can use the persist parameter to direct the
+     *   persistent output to a new file or to specify one of the following predefined persistence modes:
+     *   {@link #MSIDBOPEN_CREATEDIRECT} - Create a new database, direct mode read/write.
+     *   {@link #MSIDBOPEN_CREATE} - Create a new database, transact mode read/write.
+     *   {@link #MSIDBOPEN_DIRECT} - Open a database direct read/write without transaction.
+     *   {@link #MSIDBOPEN_READONLY} - Open a database read-only, no persistent changes.
+     *   {@link #MSIDBOPEN_TRANSACT} - Open a database read/write in transaction mode.
+     *   {@link #MSIDBOPEN_PATCHFILE} - Add this flag to indicate a patch file.
+     *
+     * @param phDatabase
+     *   Pointer to the location of the returned database handle.
+     *
+     * @return
+     *  ERROR_CREATE_FAILED - The database could not be created.
+     *  ERROR_INVALID_PARAMETER - One of the parameters was invalid.
+     *  ERROR_OPEN_FAILED - The database could not be opened as requested.
+     *  ERROR_SUCCESS - The function succeeded.
+     */
+    int MsiOpenDatabase(String szDatabasePath, String szPersist, PointerByReference phDatabase);
+
+    /**
+     * The MsiRecordGetString function returns the string value of a record field.
+     *
+     * @param hRecord
+     *   Handle to the record.
+     *
+     * @param iField
+     *   Specifies the field requested.
+     *
+     * @param szValueBuf
+     *   Pointer to the buffer that receives the null terminated string containing the value of the record field. Do not
+     *   attempt to determine the size of the buffer by passing in a null (value=0) for szValueBuf. You can get the size
+     *   of the buffer by passing in an empty string (for example ""). The function then returns ERROR_MORE_DATA and
+     *   pcchValueBuf contains the required buffer size in TCHARs, not including the terminating null character. On
+     *   return of ERROR_SUCCESS, pcchValueBuf contains the number of TCHARs written to the buffer, not including the
+     *   terminating null character.
+     *
+     * @param pcchValueBuf
+     *   Pointer to the variable that specifies the size, in TCHARs, of the buffer pointed to by the variable
+     *   szValueBuf. When the function returns ERROR_SUCCESS, this variable contains the size of the data copied to
+     *   szValueBuf, not including the terminating null character. If szValueBuf is not large enough, the function
+     *   returns ERROR_MORE_DATA and stores the required size, not including the terminating null character, in the
+     *   variable pointed to by pcchValueBuf.
+     *
+     * @return
+     *   ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *   ERROR_INVALID_PARAMETER - An invalid parameter was supplied.
+     *   ERROR_MORE_DATA - The provided buffer was too small to hold the entire value.
+     *   ERROR_SUCCESS - The function succeeded.
+     */
+    int MsiRecordGetString(Pointer hRecord, int iField, char[] szValueBuf, IntByReference pcchValueBuf);
+
+    /**
+     * The MsiSummaryInfoGetProperty function gets a single property from the summary information stream.
+     *
+     * @param hSummaryInfo
+     *   Handle to summary information.
+     *
+     * @param uiProperty
+     *   Specifies the property ID of the summary property. This parameter can be a property ID listed in the Summary
+     *   Information Stream Property Set. This function does not return values for PID_DICTIONARY OR PID_THUMBNAIL
+     *   property.
+     *
+     * @param puiDataType
+     *   Receives the returned property type. This parameter can be a type listed in the Summary Information Stream
+     *   Property Set.
+     *
+     * @param piValue
+     *   Receives the returned integer property data.
+     *
+     * @param pftValue
+     *   Pointer to a file value.
+     *
+     * @param szValueBuf
+     *   Pointer to the buffer that receives the null terminated summary information property value. Do not attempt to
+     *   determine the size of the buffer by passing in a null (value=0) for szValueBuf. You can get the size of the
+     *   buffer by passing in an empty string (for example ""). The function then returns ERROR_MORE_DATA and
+     *   pcchValueBuf contains the required buffer size in TCHARs, not including the terminating null character. On
+     *   return of ERROR_SUCCESS, pcchValueBuf contains the number of TCHARs written to the buffer, not including the
+     *   terminating null character. This parameter is an empty string if there are no errors.
+     *
+     * @param pcchValueBuf
+     *   Pointer to the variable that specifies the size, in TCHARs, of the buffer pointed to by the variable
+     *   szValueBuf. When the function returns ERROR_SUCCESS, this variable contains the size of the data copied to
+     *   szValueBuf, not including the terminating null character. If szValueBuf is not large enough, the function
+     *   returns ERROR_MORE_DATA and stores the required size, not including the terminating null character, in the
+     *   variable pointed to by pcchValueBuf.
+     *
+     * @return
+     *   ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *   ERROR_INVALID_PARAMETER - An invalid parameter was passed to the function.
+     *   ERROR_MORE_DATA - The buffer passed in was too small to hold the entire value.
+     *   ERROR_SUCCESS - The function succeeded.
+     *   ERROR_UNKNOWN_PROPERTY - The property is unknown.
+     */
+    int MsiSummaryInfoGetProperty(Pointer hSummaryInfo, int uiProperty, IntByReference puiDataType,
+        IntByReference piValue, FILETIME pftValue, char[] szValueBuf, IntByReference pcchValueBuf);
+
+    /**
+     * The MsiViewExecute function executes a SQL view query and supplies any required parameters. The query uses
+     * the question mark token to represent parameters as described in SQL Syntax. The values of these parameters
+     * are passed in as the corresponding fields of a parameter record.
+     * <p>
+     * Note: In low memory situations, this function can raise a STATUS_NO_MEMORY exception.
+     *
+     * @param hView
+     *   Handle to the view upon which to execute the query.
+     *
+     * @param hRecord
+     *   Handle to a record that supplies the parameters. This parameter contains values to replace the parameter
+     *   tokens in the SQL query. It is optional, so hRecord can be zero.
+     *
+     * @return
+     *   ERROR_FUNCTION_FAILED - A view could not be executed.
+     *   ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *   ERROR_SUCCESS - The function succeeded.
+     */
+    int MsiViewExecute(Pointer hView, Pointer hRecord);
+
+    /**
+     * The MsiViewFetch function fetches the next sequential record from the view. This function returns a handle that
+     * should be closed using {@link #MsiCloseHandle}.
+     * <p>
+     * Note: In low memory situations, this function can raise a STATUS_NO_MEMORY exception.
+     *
+     * @param hView
+     *   Handle to the view to fetch from.
+     *
+     * @param phRecord
+     *   Pointer to the handle for the fetched record.
+     *
+     * @return
+     *   ERROR_FUNCTION_FAILED - An error occurred during fetching.
+     *   ERROR_INVALID_HANDLE - An invalid or inactive handle was supplied.
+     *   ERROR_INVALID_HANDLE_STATE - The handle was in an invalid state.
+     *   ERROR_NO_MORE_ITEMS - No records remain, and a null handle is returned.
+     *   ERROR_SUCCESS - The function succeeded, and a handle to the record is returned.
+     */
+    int MsiViewFetch(Pointer hView, PointerByReference phRecord);
 }
