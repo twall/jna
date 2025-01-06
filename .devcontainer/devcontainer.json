@@ -1,0 +1,36 @@
+{
+	"name": "JNA Development",
+	"build": {"dockerfile": "Dockerfile"},
+	"postAttachCommand": "ant clean && ant",
+	"features": {
+		"ghcr.io/devcontainers/features/java:1": {
+			"version": "none",
+			"installMaven": "true",
+			"mavenVersion": "3.8.6",
+			"installGradle": "false"
+		},
+		"ghcr.io/devcontainers-contrib/features/ant-sdkman:2": {}
+	},
+	"customizations": {
+		"vscode": {
+			"settings": {
+        "java.completion.enabled": true,
+        "java.debug.settings.enableRunDebugCodeLens": true,
+        "java.test.editor.enableShortcuts": true,
+        "terminal.integrated.customGlyphs": true,
+        "terminal.integrated.enableImages": true,
+        "terminal.integrated.gpuAcceleration": "on"
+			},
+			"extensions": [
+				"github.codespaces",
+				"oracle-labs-graalvm.graalvm",
+				"redhat.vscode-yaml",
+				"streetsidesoftware.code-spell-checker",
+        "asf.apache-netbeans-java",
+        "github.copilot",
+        "oracle-labs-graalvm.dashboard",
+        "oracle-labs-graalvm.graalvm-pack"
+			]
+		}
+	}
+}
