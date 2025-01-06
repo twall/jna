@@ -362,4 +362,30 @@ public final class Platform {
         }
         return osPrefix;
     }
+
+    public static String getMultiArchPath() {
+        String cpu = ARCH;
+        String kernel = iskFreeBSD()
+            ? "-kfreebsd"
+            : (isGNU() ? "" : "-linux");
+        String libc = "-gnu";
+
+        if (isIntel()) {
+            cpu = (is64Bit() ? "x86_64" : "i386");
+        }
+        else if (isPPC()) {
+            cpu = cpu.replace("ppc", "powerpc");
+        }
+        else if (isARM()) {
+            cpu = (is64Bit() ? "aarch64" : "arm");
+            libc = is64Bit()
+                ? "-gnu"
+                : ("armel".equals(ARCH) ? "-gnueabi" : "-gnueabihf");
+        }
+        else if (ARCH.equals("mips64el")) {
+            libc = "-gnuabi64";
+        }
+
+        return cpu + kernel + libc;
+    }
 }

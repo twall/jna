@@ -942,7 +942,7 @@ public class NativeLibrary implements Closeable {
             // so for platforms which are not multi-arch
             // this should continue to work.
             if (Platform.isLinux() || Platform.iskFreeBSD() || Platform.isGNU()) {
-                String multiArchPath = getMultiArchPath();
+                String multiArchPath = Platform.getMultiArchPath();
 
                 // Assemble path with all possible options
                 paths = new String[] {
@@ -986,30 +986,6 @@ public class NativeLibrary implements Closeable {
             }
         }
         librarySearchPath.addAll(initPaths("jna.platform.library.path"));
-    }
-
-    private static String getMultiArchPath() {
-        String cpu = Platform.ARCH;
-        String kernel = Platform.iskFreeBSD()
-            ? "-kfreebsd"
-            : (Platform.isGNU() ? "" : "-linux");
-        String libc = "-gnu";
-
-        if (Platform.isIntel()) {
-            cpu = (Platform.is64Bit() ? "x86_64" : "i386");
-        }
-        else if (Platform.isPPC()) {
-            cpu = (Platform.is64Bit() ? "powerpc64" : "powerpc");
-        }
-        else if (Platform.isARM()) {
-            cpu = "arm";
-            libc = "-gnueabi";
-        }
-        else if (Platform.ARCH.equals("mips64el")) {
-            libc = "-gnuabi64";
-        }
-
-        return cpu + kernel + libc;
     }
 
     /**
