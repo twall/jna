@@ -164,10 +164,14 @@ public class NativeLibrary implements Closeable {
     }
 
     private static final int DEFAULT_OPEN_OPTIONS = -1;
-    private static int openFlags(Map<String, ?> options) {
+    private static final int DEFAULT_WINDOWS_RELATIVE_PATH_OPEN_OPTIONS = 0;
+    private static int openFlags(Map<String, ?> options, boolean isAbsolutePath) {
         Object opt = options.get(Library.OPTION_OPEN_FLAGS);
         if (opt instanceof Number) {
             return ((Number)opt).intValue();
+        }
+        if (Platform.isWindows() && !isAbsolutePath) {
+            return DEFAULT_WINDOWS_RELATIVE_PATH_OPEN_OPTIONS;
         }
         return DEFAULT_OPEN_OPTIONS;
     }
@@ -178,7 +182,7 @@ public class NativeLibrary implements Closeable {
         List<Throwable> exceptions = new ArrayList<>();
         boolean isAbsolutePath = new File(libraryName).isAbsolute();
         LinkedHashSet<String> searchPath = new LinkedHashSet<>();
-        int openFlags = openFlags(options);
+        int openFlags = openFlags(options, isAbsolutePath);
 
         //
         // Prepend any custom search paths specifically for this library
@@ -475,7 +479,7 @@ public class NativeLibrary implements Closeable {
 
             if (library == null) {
                 if (libraryName == null) {
-                    library = new NativeLibrary("<process>", null, Native.open(null, openFlags(options)), options);
+                    library = new NativeLibrary("<process>", null, Native.open(null, openFlags(options, true)), options);
                 }
                 else {
                     library = loadLibrary(libraryName, options);
