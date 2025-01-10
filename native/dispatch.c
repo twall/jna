@@ -418,15 +418,54 @@ throwByName(JNIEnv *env, const char *name, const char *msg)
 {
   jclass cls;
 
+  jthrowable thrown = (*env)->ExceptionOccurred(env);
   (*env)->ExceptionClear(env);
 
   cls = (*env)->FindClass(env, name);
 
   if (cls != NULL) { /* Otherwise an exception has already been thrown */
+    if (thrown != NULL) {
+        /* Attach thrown exception if possible. */
+        /* do_throw_clean is an exit path that will delete 'thrown' if we can't do that. */
+        jmethodID init = (*env)->GetMethodID(env, cls, "<init>", "(Ljava/lang/String;)V");
+        if (init == NULL) {
+            goto do_throw_clean;
+        }
+        jmethodID initCause = (*env)->GetMethodID(env, cls, "initCause", "(Ljava/lang/Throwable;)Ljava/lang/Throwable;");
+        if (initCause == NULL) {
+            goto do_throw_clean;
+        }
+        jobject str = (*env)->NewStringUTF(env, msg);
+        if (str == NULL) {
+            goto do_throw_clean;
+        }
+        jthrowable t = (jthrowable) (*env)->NewObject(env, cls, init, str);
+        (*env)->DeleteLocalRef(env, str);
+        if (t == NULL) {
+            goto do_throw_clean;
+        }
+        jobject ret = (*env)->CallObjectMethod(env, t, initCause, thrown);
+        if (ret == NULL) {
+            goto do_throw_clean;
+        }
+        (*env)->DeleteLocalRef(env, ret);
+        (*env)->Throw(env, t);
+        goto clean_cls;
+	} else {
+        goto do_throw;
+	}
+	/* Deletes thrown exception reference and clears the exception.  */
+do_throw_clean:
+    (*env)->DeleteLocalRef(env, thrown);
+    (*env)->ExceptionClear(env);
+do_throw:
     (*env)->ThrowNew(env, cls, msg);
 
+clean_cls:
     /* It's a good practice to clean up the local references. */
     (*env)->DeleteLocalRef(env, cls);
+  } else if (thrown != NULL) {
+    (*env)->DeleteLocalRef(env, thrown);
   }
 }
 
